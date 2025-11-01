@@ -10,6 +10,7 @@ public:
 
 	void Init(const std::filesystem::path& baseDir);
 	void Info(const std::wstring& message);
+	void Warn(const std::wstring& message);
 	void Error(const std::wstring& message);
 	void RawUTF8(const std::string& message);
 

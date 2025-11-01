@@ -12,12 +12,20 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <queue>
+#include <mutex>
 
 // --- Global Variables ---
 SERVICE_STATUS g_ServiceStatus = {};                //NOSONAR: Can't be const due to Windows API
 SERVICE_STATUS_HANDLE g_StatusHandle = nullptr;     //NOSONAR: Can't be const due to Windows API
+
 HANDLE g_ServiceStopEvent = INVALID_HANDLE_VALUE;   //NOSONAR: Can't be const due to Windows API
+HANDLE g_DeviceEventSignal = nullptr;               //NOSONAR: Can't be const due to Windows API
+
 std::vector<HDEVNOTIFY> g_DeviceNotifyHandles;      //NOSONAR: Can't be const due to Windows API
+
+static std::queue<DeviceEvent> g_DeviceQueue;       //NOSONAR: Can't be const due to Windows API
+static std::mutex g_DeviceQueueMutex;               //NOSONAR: Can't be const due to Windows API
 
 // --- Device Interface GUIDs ---
 const std::array<GUID, 5>& GetInterfaceGuids() noexcept {
@@ -61,60 +69,99 @@ std::wstring ExtractVidPid(const std::wstring& path) {
 }
 
 // --- Worker Thread ---
-DWORD WINAPI ServiceWorkerThread(LPVOID) {
+DWORD WINAPI ServiceWorkerThread(LPVOID)
+{
     Logger::Instance().Info(L"Service worker thread started.");
-    while (WaitForSingleObject(g_ServiceStopEvent, EVT_SERVICE_STARTED) != WAIT_OBJECT_0) {
-        // Optional: background monitoring work here
+
+	std::array<HANDLE, 2> waits = { g_ServiceStopEvent, g_DeviceEventSignal };
+
+    bool running = true;
+    while (running)
+    {
+        DWORD wait = WaitForMultipleObjects(2, waits.data(), FALSE, INFINITE);
+        switch (wait)
+        {
+        case WAIT_OBJECT_0: // g_ServiceStopEvent
+            running = false;
+            break;
+
+        case WAIT_OBJECT_0 + 1: // g_DeviceEventSignal
+        {
+            // Drain the queue (process all current events)
+            while (true) {
+                DeviceEvent evt{};
+                {
+                    std::scoped_lock lk(g_DeviceQueueMutex);
+                    if (g_DeviceQueue.empty()) break;
+                    evt = std::move(g_DeviceQueue.front());
+                    g_DeviceQueue.pop();
+                }
+
+                // Processing 
+                std::wstring msg;
+                switch (evt.action) {
+                case DeviceAction::Arrival:    msg = L"Device arrival: "; break;
+                case DeviceAction::Removal:    msg = L"Device removal: "; break;
+                case DeviceAction::NodeChange: msg = L"Device node change: "; break;
+                default:                        msg = L"Device event: "; break;
+                }
+                msg += evt.devicePath;
+
+                Logger::Instance().Info(msg);
+                EventWriter::Instance().Info(EVT_DEVICE_CONNECTED, msg); // reuse 2000 for now
+                // Next PRs: SetupAPI enrichment, classification, volume mapping, policy decisions
+            }
+            break;
+        }
+
+        default:
+            // Shouldn't happen; log and continue
+            Logger::Instance().Warn(L"Unexpected WaitForMultipleObjects result in worker.");
+            break;
+        }
     }
+
     Logger::Instance().Info(L"Service worker thread stopping...");
     return ERROR_SUCCESS;
 }
 
+
 // --- Service Control Handler ---
-DWORD WINAPI ServiceCtrlHandler(DWORD CtrlCode, DWORD EventType, LPVOID EventData, LPVOID) {
-    switch (CtrlCode) {
+DWORD WINAPI ServiceCtrlHandler(DWORD CtrlCode, DWORD EventType, LPVOID EventData, LPVOID)
+{
+    switch (CtrlCode)
+    {
     case SERVICE_CONTROL_STOP:
-        if (g_ServiceStatus.dwCurrentState != SERVICE_RUNNING)
-            break;
-        g_ServiceStatus.dwControlsAccepted = 0;
-        g_ServiceStatus.dwCurrentState = SERVICE_STOP_PENDING;
-        SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
-        SetEvent(g_ServiceStopEvent);
-        break;
-
-    case SERVICE_CONTROL_DEVICEEVENT: {
-        const auto* hdr = static_cast<const DEV_BROADCAST_HDR*>(EventData);
-        if (!hdr) break;
-
-        if (hdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
-            const auto* devInfo = static_cast<const DEV_BROADCAST_DEVICEINTERFACE*>(EventData);
-            std::wstring deviceName(devInfo->dbcc_name ? devInfo->dbcc_name : L"(unknown)");
-
-            switch (EventType) {
-            case DBT_DEVICEARRIVAL: {
-                const std::wstring msg = L"USB Device Connected: " + deviceName;
-                Logger::Instance().Info(msg);
-                EventWriter::Instance().Info(EVT_DEVICE_CONNECTED, msg);
-
-                const auto vidpid = ExtractVidPid(deviceName);
-                if (!vidpid.empty()) {
-                    Logger::Instance().Info(L"Device Info: " + vidpid);
-                    EventWriter::Instance().Info(EVT_DEVICE_CONNECTED, vidpid);
-                }
-                break;
-            }
-            case DBT_DEVICEREMOVECOMPLETE: {
-                const std::wstring msg = L"USB Device Disconnected: " + deviceName;
-                Logger::Instance().Info(msg);
-                EventWriter::Instance().Info(EVT_DEVICE_DISCONNECTED, msg);
-                break;
-            }
-            default:
-                break;
-            }
+    case SERVICE_CONTROL_SHUTDOWN:
+        if (g_ServiceStatus.dwCurrentState == SERVICE_RUNNING) {
+            g_ServiceStatus.dwControlsAccepted = 0;
+            g_ServiceStatus.dwCurrentState = SERVICE_STOP_PENDING;
+            SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
+            SetEvent(g_ServiceStopEvent);
         }
         break;
+
+    case SERVICE_CONTROL_DEVICEEVENT:
+    {
+        const auto* hdr = static_cast<const DEV_BROADCAST_HDR*>(EventData);
+        if (!hdr || hdr->dbch_devicetype != DBT_DEVTYP_DEVICEINTERFACE) break;
+
+        const auto* devInfo = static_cast<const DEV_BROADCAST_DEVICEINTERFACE*>(EventData);
+        DeviceEvent evt{};
+        evt.devicePath = devInfo->dbcc_name ? devInfo->dbcc_name : L"(unknown)";
+        evt.classGuid = devInfo->dbcc_classguid;
+
+        switch (EventType) {
+        case DBT_DEVICEARRIVAL:         evt.action = DeviceAction::Arrival;   break;
+        case DBT_DEVICEREMOVECOMPLETE:  evt.action = DeviceAction::Removal;   break;
+        case DBT_DEVNODES_CHANGED:      evt.action = DeviceAction::NodeChange; break;
+        default:                        evt.action = DeviceAction::Unknown;   break;
+        }
+
+        EnqueueDeviceEvent(evt);
+        break;
     }
+
     default:
         break;
     }
@@ -143,6 +190,24 @@ void RegisterForDeviceNotifications(SERVICE_STATUS_HANDLE serviceStatus) {
     }
 }
 
+void EnqueueDeviceEvent(const DeviceEvent& evt)
+{
+    {
+        std::scoped_lock lk(g_DeviceQueueMutex);
+        g_DeviceQueue.push(evt);
+    }
+    if (g_DeviceEventSignal) {
+        SetEvent(g_DeviceEventSignal); // wake worker immediately
+    }
+}
+
+void SetErrorStatus(const DWORD& err)
+{
+    g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+    g_ServiceStatus.dwWin32ExitCode = err;
+	SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
+}
+
 // --- Service Main Entry ---
 void WINAPI ServiceMain() {
     Logger::Instance().Init(ProgramDataPath());
@@ -155,9 +220,25 @@ void WINAPI ServiceMain() {
     g_ServiceStatus.dwCurrentState = SERVICE_START_PENDING;
     SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
 
+    // Create the service stop event
     g_ServiceStopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
-    if (!g_ServiceStopEvent) return;
+    if (!g_ServiceStopEvent) {
+        DWORD err = GetLastError();
+        Logger::Instance().Error(L"CreateEvent(ServiceStopEvent) failed: " + Logger::LastErrorMessage(err));
+		SetErrorStatus(err);
+		return;
+    }
 
+    // create the device event signal (auto-reset, unsignaled)
+    g_DeviceEventSignal = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (!g_DeviceEventSignal) {
+        DWORD err = GetLastError();
+        Logger::Instance().Error(L"CreateEvent(DeviceEventSignal) failed: " + Logger::LastErrorMessage(err));
+        SetErrorStatus(err);
+        return;
+    }
+
+	// Service is running
     g_ServiceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
     g_ServiceStatus.dwCurrentState = SERVICE_RUNNING;
     SetServiceStatus(g_StatusHandle, &g_ServiceStatus);
@@ -173,10 +254,16 @@ void WINAPI ServiceMain() {
         CloseHandle(hThread);
     }
 
+    // === Cleanup ===
     for (auto& handle : g_DeviceNotifyHandles) {
         if (handle) UnregisterDeviceNotification(handle);
     }
     g_DeviceNotifyHandles.clear();
+
+    if (g_DeviceEventSignal) {
+        CloseHandle(g_DeviceEventSignal);
+        g_DeviceEventSignal = nullptr;
+    }
 
     if (g_ServiceStopEvent) {
         CloseHandle(g_ServiceStopEvent);
@@ -189,6 +276,7 @@ void WINAPI ServiceMain() {
     Logger::Instance().Info(L"Service stopped cleanly.");
     EventWriter::Instance().Info(EVT_SERVICE_STOPPED, L"Service stopped cleanly.");
 }
+
 
 // --- Entry Point ---
 int wmain(int, wchar_t* []) {

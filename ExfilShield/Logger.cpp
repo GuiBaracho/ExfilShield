@@ -21,6 +21,11 @@ void Logger::Info(const std::wstring& message)
 	RawUTF8(WtoUTF8(L"[INFO] " + message));
 }
 
+void Logger::Warn(const std::wstring& message)
+{
+	RawUTF8(WtoUTF8(L"[WARN] " + message));
+}
+
 void Logger::Error(const std::wstring& message)
 {
 	RawUTF8(WtoUTF8(L"[ERROR] " + message));
@@ -139,6 +144,6 @@ std::wstring Logger::LastErrorMessage(DWORD errorCode)
 
 	if (buf) LocalFree(buf);
 
-	return std::wstring();
+	return msg;
 }
 
