@@ -1,6 +1,7 @@
 #include "ExfilShield.h"
 #include "Logger.h"
 #include "EventLog.h"
+#include "DeviceIdentity.h"
 
 #include <dbt.h>
 #include <initguid.h>
@@ -68,6 +69,41 @@ std::wstring ExtractVidPid(const std::wstring& path) {
     return info;
 }
 
+void ProcessDeviceEvents() {
+    while (true) {
+        DeviceEvent evt{};
+        {
+            std::scoped_lock lk(g_DeviceQueueMutex);
+            if (g_DeviceQueue.empty()) break;
+            evt = std::move(g_DeviceQueue.front());
+            g_DeviceQueue.pop();
+        }
+
+        // === Enriched device processing ===
+        if (evt.action == DeviceAction::Arrival || evt.action == DeviceAction::NodeChange)
+        {
+            DeviceIdentity ident = BuildDeviceIdentity(evt.devicePath, evt.classGuid);
+
+            std::wstringstream ss;
+            ss << L"[" << ident.category << L"] "
+                << (!ident.friendlyName.empty() ? ident.friendlyName : L"(Unnamed Device)")
+                << L" | VID=" << (ident.vid.empty() ? L"??" : ident.vid)
+                << L" PID=" << (ident.pid.empty() ? L"??" : ident.pid)
+                << L" | Manufacturer=" << (ident.manufacturer.empty() ? L"??" : ident.manufacturer)
+                << L" | Serial=" << (ident.serial.empty() ? L"??" : ident.serial);
+
+            Logger::Instance().Info(ss.str());
+            EventWriter::Instance().Info(2100, ss.str());
+        }
+        else if (evt.action == DeviceAction::Removal)
+        {
+            std::wstring msg = L"Device removal: " + evt.devicePath;
+            Logger::Instance().Info(msg);
+            EventWriter::Instance().Info(2101, msg);
+        }
+    }
+}
+
 // --- Worker Thread ---
 DWORD WINAPI ServiceWorkerThread(LPVOID)
 {
@@ -87,30 +123,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID)
 
         case WAIT_OBJECT_0 + 1: // g_DeviceEventSignal
         {
-            // Drain the queue (process all current events)
-            while (true) {
-                DeviceEvent evt{};
-                {
-                    std::scoped_lock lk(g_DeviceQueueMutex);
-                    if (g_DeviceQueue.empty()) break;
-                    evt = std::move(g_DeviceQueue.front());
-                    g_DeviceQueue.pop();
-                }
-
-                // Processing 
-                std::wstring msg;
-                switch (evt.action) {
-                case DeviceAction::Arrival:    msg = L"Device arrival: "; break;
-                case DeviceAction::Removal:    msg = L"Device removal: "; break;
-                case DeviceAction::NodeChange: msg = L"Device node change: "; break;
-                default:                        msg = L"Device event: "; break;
-                }
-                msg += evt.devicePath;
-
-                Logger::Instance().Info(msg);
-                EventWriter::Instance().Info(EVT_DEVICE_CONNECTED, msg); // reuse 2000 for now
-                // Next PRs: SetupAPI enrichment, classification, volume mapping, policy decisions
-            }
+			ProcessDeviceEvents();
             break;
         }
 

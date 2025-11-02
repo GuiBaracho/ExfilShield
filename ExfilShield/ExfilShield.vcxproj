@@ -124,11 +124,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="DeviceIdentity.cpp" />
     <ClCompile Include="EventLog.cpp" />
     <ClCompile Include="ExfilShield.cpp" />
     <ClCompile Include="Logger.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="DeviceIdentity.h" />
     <ClInclude Include="EventLog.h" />
     <ClInclude Include="ExfilShield.h" />
     <ClInclude Include="Logger.h" />
