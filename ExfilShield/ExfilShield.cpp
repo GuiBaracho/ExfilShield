@@ -69,6 +69,7 @@ std::wstring ExtractVidPid(const std::wstring& path) {
     return info;
 }
 
+// --- Process Device Events ---
 void ProcessDeviceEvents() {
     while (true) {
         DeviceEvent evt{};
@@ -80,27 +81,35 @@ void ProcessDeviceEvents() {
         }
 
         // === Enriched device processing ===
-        if (evt.action == DeviceAction::Arrival || evt.action == DeviceAction::NodeChange)
-        {
-            DeviceIdentity ident = BuildDeviceIdentity(evt.devicePath, evt.classGuid);
+        DeviceIdentity ident = BuildDeviceIdentity(evt.devicePath, evt.classGuid);
+        std::wstring ss;
 
-            std::wstringstream ss;
-            ss << L"[" << ident.category << L"] "
-                << (!ident.friendlyName.empty() ? ident.friendlyName : L"(Unnamed Device)")
-                << L" | VID=" << (ident.vid.empty() ? L"??" : ident.vid)
-                << L" PID=" << (ident.pid.empty() ? L"??" : ident.pid)
-                << L" | Manufacturer=" << (ident.manufacturer.empty() ? L"??" : ident.manufacturer)
-                << L" | Serial=" << (ident.serial.empty() ? L"??" : ident.serial);
-
-            Logger::Instance().Info(ss.str());
-            EventWriter::Instance().Info(2100, ss.str());
-        }
-        else if (evt.action == DeviceAction::Removal)
+        switch (evt.action)
         {
-            std::wstring msg = L"Device removal: " + evt.devicePath;
-            Logger::Instance().Info(msg);
-            EventWriter::Instance().Info(2101, msg);
+		using enum DeviceAction;
+		case Arrival:
+            ss = L"Device Arrival: " + IdentToWString(ident);
+            Logger::Instance().Info(ss);
+            EventWriter::Instance().Info(2100, ss);
+            break;
+		case NodeChange:
+            ss = L"Device Node Change: " + IdentToWString(ident);
+            Logger::Instance().Info(ss);
+            EventWriter::Instance().Info(2100, ss);
+            break;
+		case Removal:
+            ss = L"Device Removal: " + evt.devicePath;
+            Logger::Instance().Info(ss);
+            EventWriter::Instance().Info(2101, ss);
+            break;
+        case Unknown:
+            Logger::Instance().Warn(L"Received unknown device event.");
+            EventWriter::Instance().Warn(EVT_ERROR, L"Received unknown device event.");
+            break;
+        default:
+            break;
         }
+        
     }
 }
 
@@ -165,10 +174,11 @@ DWORD WINAPI ServiceCtrlHandler(DWORD CtrlCode, DWORD EventType, LPVOID EventDat
         evt.classGuid = devInfo->dbcc_classguid;
 
         switch (EventType) {
-        case DBT_DEVICEARRIVAL:         evt.action = DeviceAction::Arrival;   break;
-        case DBT_DEVICEREMOVECOMPLETE:  evt.action = DeviceAction::Removal;   break;
-        case DBT_DEVNODES_CHANGED:      evt.action = DeviceAction::NodeChange; break;
-        default:                        evt.action = DeviceAction::Unknown;   break;
+        using enum DeviceAction;
+        case DBT_DEVICEARRIVAL:         evt.action = Arrival;   break;
+        case DBT_DEVICEREMOVECOMPLETE:  evt.action = Removal;   break;
+        case DBT_DEVNODES_CHANGED:      evt.action = NodeChange; break;
+        default:                        evt.action = Unknown;   break;
         }
 
         EnqueueDeviceEvent(evt);

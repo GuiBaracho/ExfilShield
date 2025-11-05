@@ -16,8 +16,10 @@ struct DeviceIdentity
     std::wstring manufacturer;
     std::wstring className;
     GUID classGuid{};
-    std::wstring containerId;
+    GUID containerId;
     std::wstring category; // classified type
 };
 
 DeviceIdentity BuildDeviceIdentity(const std::wstring& devicePath, const GUID& classGuid);
+
+std::wstring IdentToWString(const DeviceIdentity& ident);

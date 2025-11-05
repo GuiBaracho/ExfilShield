@@ -2,14 +2,17 @@
 #include "Logger.h"
 #include <regex>
 #include <sstream>
+#include <array>
 
+// --- Helper: Extract Value via Regex ---
 static std::wstring ExtractValue(const std::wstring& input, const std::wregex& pattern) {
     if (std::wsmatch match; std::regex_search(input, match, pattern) && match.size() > 1)
         return match[1].str();
     return L"";
 }
 
-static std::wstring GetDeviceProperty(HDEVINFO devInfo, SP_DEVINFO_DATA& data, const DEVPROPKEY& key) {
+// --- Helper: Get Device Property WString ---
+static std::wstring GetDevicePropertyWString(HDEVINFO devInfo, SP_DEVINFO_DATA& data, const DEVPROPKEY& key) {
     DEVPROPTYPE type;
     WCHAR buffer[256];
     if (DWORD size = 0; SetupDiGetDevicePropertyW(devInfo, &data, &key, &type,
@@ -18,6 +21,29 @@ static std::wstring GetDeviceProperty(HDEVINFO devInfo, SP_DEVINFO_DATA& data, c
     }
     return L"";
 }
+
+// --- Helper: Get Device Property GUID ---
+static GUID GetDevicePropertyGUID(HDEVINFO devInfo, SP_DEVINFO_DATA& data, const DEVPROPKEY& key) {
+    DEVPROPTYPE type;
+    GUID buffer = {};
+    if (DWORD size = 0; SetupDiGetDevicePropertyW(devInfo, &data, &key, &type,
+        reinterpret_cast<PBYTE>(&buffer), sizeof(buffer), &size, 0)) {
+        return buffer;
+    }
+    return buffer;
+}
+
+// --- Helper: Convert GUID to String ---
+static std::wstring GuidToWString(const GUID& guid) {
+    std::array<WCHAR, 39> buffer = {};
+    return StringFromGUID2(
+        guid,
+        buffer.data(),
+        static_cast<int>(buffer.size()))
+        ? buffer.data()
+        : L"";
+}
+
 
 DeviceIdentity BuildDeviceIdentity(const std::wstring& devicePath, const GUID& classGuid)
 {
@@ -57,13 +83,13 @@ DeviceIdentity BuildDeviceIdentity(const std::wstring& devicePath, const GUID& c
             continue; // not the same instance
 
         // We found the matching device node, now query its properties
-        info.friendlyName = GetDeviceProperty(devInfo, devData, DEVPKEY_Device_FriendlyName);
-        info.manufacturer = GetDeviceProperty(devInfo, devData, DEVPKEY_Device_Manufacturer);
-        info.className = GetDeviceProperty(devInfo, devData, DEVPKEY_Device_Class);
-        info.containerId = GetDeviceProperty(devInfo, devData, DEVPKEY_Device_ContainerId);
+        info.friendlyName = GetDevicePropertyWString(devInfo, devData, DEVPKEY_Device_FriendlyName);
+        info.manufacturer = GetDevicePropertyWString(devInfo, devData, DEVPKEY_Device_Manufacturer);
+        info.className = GetDevicePropertyWString(devInfo, devData, DEVPKEY_Device_Class);
+        info.containerId = GetDevicePropertyGUID(devInfo, devData, DEVPKEY_Device_ContainerId);
 
         if (info.friendlyName.empty())
-            info.friendlyName = GetDeviceProperty(devInfo, devData, DEVPKEY_Device_DeviceDesc);
+            info.friendlyName = GetDevicePropertyWString(devInfo, devData, DEVPKEY_Device_DeviceDesc);
 
         break;
     }
@@ -89,5 +115,17 @@ DeviceIdentity BuildDeviceIdentity(const std::wstring& devicePath, const GUID& c
 		info.category = cls.empty() ? L"Unknown" : cls;
 
     return info;
+}
+
+std::wstring IdentToWString(const DeviceIdentity& ident)
+{
+    std::wstringstream ss;
+    ss << L"[" << ident.category << L"] "
+        << (!ident.friendlyName.empty() ? ident.friendlyName : L"(Unnamed Device)")
+        << L" | VID=" << (ident.vid.empty() ? L"??" : ident.vid)
+        << L" PID=" << (ident.pid.empty() ? L"??" : ident.pid)
+        << L" | Manufacturer=" << (ident.manufacturer.empty() ? L"??" : ident.manufacturer)
+        << L" | ContainerId=" << GuidToWString(ident.containerId);
+    return ss.str();
 }
 
