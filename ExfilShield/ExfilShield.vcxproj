@@ -103,6 +103,8 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>
+      </AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -124,16 +126,24 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="DeviceControl.cpp" />
     <ClCompile Include="DeviceIdentity.cpp" />
     <ClCompile Include="EventLog.cpp" />
     <ClCompile Include="ExfilShield.cpp" />
     <ClCompile Include="Logger.cpp" />
+    <ClCompile Include="PolicyManager.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\..\..\Downloads\json.hpp" />
+    <ClInclude Include="DeviceControl.h" />
     <ClInclude Include="DeviceIdentity.h" />
     <ClInclude Include="EventLog.h" />
     <ClInclude Include="ExfilShield.h" />
     <ClInclude Include="Logger.h" />
+    <ClInclude Include="PolicyManager.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\..\Downloads\RemotePolicySync_Roadmap.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

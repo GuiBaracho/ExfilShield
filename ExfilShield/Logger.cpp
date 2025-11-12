@@ -31,6 +31,11 @@ void Logger::Error(const std::wstring& message)
 	RawUTF8(WtoUTF8(L"[ERROR] " + message));
 }
 
+void Logger::Debug(const std::wstring& message)
+{
+	RawUTF8(WtoUTF8(L"[DEBUG] " + message));
+}
+
 void Logger::RotateLogIfNeededUnlocked()
 {
 	SYSTEMTIME now{};

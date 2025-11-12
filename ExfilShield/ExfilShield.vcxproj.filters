@@ -27,6 +27,12 @@
     <ClCompile Include="DeviceIdentity.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PolicyManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DeviceControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Logger.h">
@@ -41,5 +47,19 @@
     <ClInclude Include="DeviceIdentity.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="PolicyManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Downloads\json.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DeviceControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\..\Downloads\RemotePolicySync_Roadmap.md">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

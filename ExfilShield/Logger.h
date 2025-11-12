@@ -12,6 +12,7 @@ public:
 	void Info(const std::wstring& message);
 	void Warn(const std::wstring& message);
 	void Error(const std::wstring& message);
+	void Debug(const std::wstring& message);
 	void RawUTF8(const std::string& message);
 
 	static std::string WtoUTF8(const std::wstring& w);

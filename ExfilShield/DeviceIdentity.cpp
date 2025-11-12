@@ -44,9 +44,27 @@ static std::wstring GuidToWString(const GUID& guid) {
         : L"";
 }
 
+static std::wstring GetDeviceInstanceId(HDEVINFO devInfo, SP_DEVINFO_DATA& data) {
+    if (WCHAR instanceIdBuf[MAX_DEVICE_ID_LEN]; 
+        SetupDiGetDeviceInstanceIdW(devInfo, &data, instanceIdBuf, MAX_DEVICE_ID_LEN, nullptr))
+        return instanceIdBuf;
+    return L"";
+}
 
 DeviceIdentity BuildDeviceIdentity(const std::wstring& devicePath, const GUID& classGuid)
 {
+    // Verify interface still exists
+    HANDLE h = CreateFileW(devicePath.c_str(), 0, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+    {
+        DWORD err = GetLastError();
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND || err == ERROR_DEVICE_NOT_CONNECTED) {
+            return {}; // <-- path no longer valid
+        }
+    }
+    else
+        CloseHandle(h);
+
     DeviceIdentity info{};
     info.devicePath = devicePath;
     info.classGuid = classGuid;
@@ -87,6 +105,8 @@ DeviceIdentity BuildDeviceIdentity(const std::wstring& devicePath, const GUID& c
         info.manufacturer = GetDevicePropertyWString(devInfo, devData, DEVPKEY_Device_Manufacturer);
         info.className = GetDevicePropertyWString(devInfo, devData, DEVPKEY_Device_Class);
         info.containerId = GetDevicePropertyGUID(devInfo, devData, DEVPKEY_Device_ContainerId);
+		info.instanceId = GetDeviceInstanceId(devInfo, devData);
+		info.devInst = devData.DevInst;
 
         if (info.friendlyName.empty())
             info.friendlyName = GetDevicePropertyWString(devInfo, devData, DEVPKEY_Device_DeviceDesc);

@@ -18,6 +18,8 @@ struct DeviceIdentity
     GUID classGuid{};
     GUID containerId;
     std::wstring category; // classified type
+	DEVINST devInst{}; // device instance handle
+	std::wstring instanceId;
 };
 
 DeviceIdentity BuildDeviceIdentity(const std::wstring& devicePath, const GUID& classGuid);

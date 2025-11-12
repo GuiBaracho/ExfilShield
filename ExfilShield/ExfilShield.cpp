@@ -2,6 +2,8 @@
 #include "Logger.h"
 #include "EventLog.h"
 #include "DeviceIdentity.h"
+#include "PolicyManager.h"
+#include "DeviceControl.h"
 
 #include <dbt.h>
 #include <initguid.h>
@@ -69,6 +71,22 @@ std::wstring ExtractVidPid(const std::wstring& path) {
     return info;
 }
 
+std::wstring ActionTaken(const DeviceIdentity& ident) {
+    DEVINST root = FindContainerRoot(ident.devInst, ident.containerId);
+
+    switch (PolicyManager::Instance().EvaluateDevice(ident)) {
+        using enum PolicyAction;
+    case Block:
+        if (DisableDevnode(root, /*persist*/false) == CR_SUCCESS)
+            return L"[BLOCKED] ";
+        else
+            return L"[BLOCK FAILED] ";
+    case Allow: return L"[ALLOWED] ";
+    case Audit: return L"[AUDITED] ";
+    default: return L"[UNKNOWN] ";
+    }
+}
+
 // --- Process Device Events ---
 void ProcessDeviceEvents() {
     while (true) {
@@ -82,22 +100,22 @@ void ProcessDeviceEvents() {
 
         // === Enriched device processing ===
         DeviceIdentity ident = BuildDeviceIdentity(evt.devicePath, evt.classGuid);
+
         std::wstring ss;
+        
 
         switch (evt.action)
         {
 		using enum DeviceAction;
 		case Arrival:
-            ss = L"Device Arrival: " + IdentToWString(ident);
-            Logger::Instance().Info(ss);
-            EventWriter::Instance().Info(2100, ss);
-            break;
 		case NodeChange:
-            ss = L"Device Node Change: " + IdentToWString(ident);
+            if (ident.devicePath.empty()) break;
+			ss = ActionTaken(ident) + L"Device Connected: " + IdentToWString(ident);
             Logger::Instance().Info(ss);
             EventWriter::Instance().Info(2100, ss);
             break;
 		case Removal:
+			PolicyManager::Instance().OnRemoval(evt.devicePath);
             ss = L"Device Removal: " + evt.devicePath;
             Logger::Instance().Info(ss);
             EventWriter::Instance().Info(2101, ss);
@@ -235,6 +253,8 @@ void SetErrorStatus(const DWORD& err)
 void WINAPI ServiceMain() {
     Logger::Instance().Init(ProgramDataPath());
     EventWriter::Instance().Init(L"ExfilShield");
+	auto configPath = ProgramDataPath().parent_path() / L"config.json";
+	PolicyManager::Instance().LoadPolicies(configPath);
 
     g_StatusHandle = RegisterServiceCtrlHandlerEx(SERVICE_NAME, ServiceCtrlHandler, nullptr);
     if (!g_StatusHandle) return;
