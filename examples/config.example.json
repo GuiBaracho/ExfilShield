@@ -1,0 +1,25 @@
+{
+  "actions": {
+    "default": "block",
+    "blacklist": "block"
+  },
+  "whitelist": [
+    {
+      "vid": "046D",
+      "pid": "C534",
+      "serial": ""
+    },
+    {
+      "vid": "8087",
+      "pid": "",
+      "serial": ""
+    }
+  ],
+  "blacklist": [
+    {
+      "vid": "0781",
+      "pid": "",
+      "serial": ""
+    }
+  ]
+}
